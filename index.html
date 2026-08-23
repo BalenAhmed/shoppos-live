@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ckb" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ShopPOS Cloud Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background: #090d16; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; padding-bottom: 40px; }
+        .glass-card { background: rgba(22, 30, 49, 0.75); backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; }
+        .filter-btn { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #94a3b8; border-radius: 12px; padding: 6px 14px; font-size: 0.85rem; font-weight: 600; }
+        .filter-btn.active { background: #38bdf8; color: #041324; border-color: #38bdf8; box-shadow: 0 0 15px rgba(56,189,248,0.4); }
+        .nav-pills .nav-link { border-radius: 10px; color: #94a3b8; font-weight: 600; }
+        .nav-pills .nav-link.active { background: #38bdf8; color: #041324; }
+        .record-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 14px; padding: 12px; }
+        .live-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; box-shadow: 0 0 10px #10b981; }
+    </style>
+</head>
+<body>
+    <header class="glass-card m-3 p-3 d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-shop text-info fs-4"></i>
+            <div>
+                <h6 class="mb-0 fw-bold text-white">ShopPOS Cloud</h6>
+                <small class="text-muted"><span class="live-dot me-1"></span>ڕاستەوخۆ (Live)</small>
+            </div>
+        </div>
+        <button class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="refreshData()"><i class="bi bi-arrow-clockwise"></i></button>
+    </header>
+
+    <div class="container-fluid px-3">
+        <div class="d-flex gap-2 overflow-auto pb-2 mb-3">
+            <button class="filter-btn active" onclick="setFilter('today', this)">ئەمڕۆ</button>
+            <button class="filter-btn" onclick="setFilter('yesterday', this)">دوێنێ</button>
+            <button class="filter-btn" onclick="setFilter('week', this)">٧ ڕۆژی ڕابردوو</button>
+            <button class="filter-btn" onclick="setFilter('all', this)">تەواوی مێژوو</button>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-4 col-12">
+                <div class="glass-card p-3">
+                    <span class="text-muted small">کۆی گشتی فرۆش</span>
+                    <h3 class="fw-bold text-white mb-1" id="kpiSales">0 <small class="text-info" style="font-size: 0.85rem;">د.ع</small></h3>
+                    <small class="text-muted" id="kpiSalesCount">0 پسوولە</small>
+                </div>
+            </div>
+            <div class="col-md-4 col-6">
+                <div class="glass-card p-3">
+                    <span class="text-muted small">کۆی خەرجییەکان</span>
+                    <h4 class="fw-bold text-danger mb-1" id="kpiExpenses">0 <small style="font-size: 0.75rem;">د.ع</small></h4>
+                    <small class="text-muted" id="kpiExpensesCount">0 بابەت</small>
+                </div>
+            </div>
+            <div class="col-md-4 col-6">
+                <div class="glass-card p-3">
+                    <span class="text-muted small">داهاتی ماوە (قازانج)</span>
+                    <h4 class="fw-bold text-success mb-1" id="kpiNetProfit">0 <small style="font-size: 0.75rem;">د.ع</small></h4>
+                    <small class="text-muted">پوختە</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card p-3 mb-3">
+            <h6 class="fw-bold text-white mb-2"><i class="bi bi-bar-chart-line text-info me-1"></i> شیکاری فرۆش</h6>
+            <div style="height: 200px; width: 100%;"><canvas id="salesChart"></canvas></div>
+        </div>
+
+        <div class="glass-card p-3">
+            <ul class="nav nav-pills mb-3" role="tablist">
+                <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tabSales">پسوولەکان (<span id="tabSalesBadge">0</span>)</button></li>
+                <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tabExpenses">خەرجییەکان (<span id="tabExpensesBadge">0</span>)</button></li>
+            </ul>
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="tabSales"><div id="salesListContainer" class="d-flex flex-column gap-2"></div></div>
+                <div class="tab-pane fade" id="tabExpenses"><div id="expensesListContainer" class="d-flex flex-column gap-2"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const FIREBASE_URL = "https://shoppos-460e1-default-rtdb.firebaseio.com/";
+        let rawSales = [], rawExpenses = [], currentFilter = 'today', chartInstance = null;
+
+        function isSameDay(d1, d2) {
+            return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+        }
+
+        function setFilter(type, btn) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderDashboard();
+        }
+
+        async function fetchCloudData() {
+            try {
+                const [salesRes, expRes] = await Promise.all([fetch(`${FIREBASE_URL}sales.json`), fetch(`${FIREBASE_URL}expenses.json`)]);
+                rawSales = Object.values(await salesRes.json() || {});
+                rawExpenses = Object.values(await expRes.json() || {});
+                renderDashboard();
+            } catch (err) { console.error(err); }
+        }
+
+        function filterDataByDate(items, dateField) {
+            const now = new Date();
+            return items.filter(item => {
+                const d = new Date((item[dateField] || '').replace(/-/g, '/'));
+                if (currentFilter === 'today') return isSameDay(d, now);
+                if (currentFilter === 'yesterday') { const y = new Date(); y.setDate(now.getDate()-1); return isSameDay(d, y); }
+                if (currentFilter === 'week') { const w = new Date(); w.setDate(now.getDate()-7); return d >= w; }
+                return true;
+            });
+        }
+
+        function renderDashboard() {
+            const fSales = filterDataByDate(rawSales, 'sale_date');
+            const fExpenses = filterDataByDate(rawExpenses, 'expense_date');
+
+            const tSales = fSales.reduce((a, s) => a + Number(s.total_amount || 0), 0);
+            const tExp = fExpenses.reduce((a, e) => a + Number(e.amount || 0), 0);
+
+            document.getElementById('kpiSales').innerHTML = `${tSales.toLocaleString()} <small class="text-info" style="font-size: 0.85rem;">د.ع</small>`;
+            document.getElementById('kpiSalesCount').innerText = `${fSales.length} پسوولە`;
+            document.getElementById('kpiExpenses').innerHTML = `${tExp.toLocaleString()} <small style="font-size: 0.75rem;">د.ع</small>`;
+            document.getElementById('kpiExpensesCount').innerText = `${fExpenses.length} بابەت`;
+            document.getElementById('kpiNetProfit').innerHTML = `${(tSales - tExp).toLocaleString()} <small style="font-size: 0.75rem;">د.ع</small>`;
+
+            document.getElementById('tabSalesBadge').innerText = fSales.length;
+            document.getElementById('tabExpensesBadge').innerText = fExpenses.length;
+
+            const salesContainer = document.getElementById('salesListContainer');
+            salesContainer.innerHTML = fSales.length === 0 ? "<div class='text-center py-4 text-muted'>هیچ پسوولەیەک نییە</div>" : "";
+            [...fSales].reverse().forEach(s => {
+                salesContainer.innerHTML += `
+                    <div class="record-card">
+                        <div class="d-flex justify-content-between"><span class="badge bg-primary-subtle text-info font-monospace">${s.invoice_number}</span><span class="fw-bold text-success">${Number(s.total_amount).toLocaleString()} د.ع</span></div>
+                        <div class="text-muted small mt-1" style="font-size:0.75rem;">${s.sale_date}</div>
+                        ${s.items_summary ? `<div class="text-light small mt-1 opacity-75">${s.items_summary}</div>` : ''}
+                    </div>`;
+            });
+
+            const expContainer = document.getElementById('expensesListContainer');
+            expContainer.innerHTML = fExpenses.length === 0 ? "<div class='text-center py-4 text-muted'>هیچ خەرجییەک نییە</div>" : "";
+            [...fExpenses].reverse().forEach(e => {
+                expContainer.innerHTML += `
+                    <div class="record-card">
+                        <div class="d-flex justify-content-between"><span class="fw-bold text-white">${e.title}</span><span class="fw-bold text-danger">${Number(e.amount).toLocaleString()} د.ع</span></div>
+                        <div class="text-muted small mt-1" style="font-size:0.75rem;">${e.expense_date}</div>
+                        ${e.notes ? `<div class="text-muted small mt-1">${e.notes}</div>` : ''}
+                    </div>`;
+            });
+
+            updateChart(fSales);
+        }
+
+        function updateChart(sales) {
+            const ctx = document.getElementById('salesChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: sales.map(s => (s.sale_date || '').split(' ')[1] || ''),
+                    datasets: [{ label: 'فرۆش', data: sales.map(s => Number(s.total_amount || 0)), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.1)', fill: true, tension: 0.3 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: '#64748b' } }, y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b' } } } }
+            });
+        }
+
+        function refreshData() { fetchCloudData(); }
+        fetchCloudData();
+        setInterval(fetchCloudData, 5000);
+    </script>
+</body>
+</html>
